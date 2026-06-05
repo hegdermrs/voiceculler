@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.DS_Store
+*.log
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Local-only media (personal photos and unused audio samples)
+Input/
+resources/
