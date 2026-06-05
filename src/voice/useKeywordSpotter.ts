@@ -13,18 +13,18 @@ const REJECT_WORD = "no";
 const MODEL_JSON = "/speech-model/18w/model.json";
 const METADATA_JSON = "/speech-model/18w/metadata.json";
 
-// Only fire when the model is confident, and ignore noise/unknown.
-const PROB_THRESHOLD = 0.8;
-// Native suppression window in the library (kept short for rapid fire).
-const SUPPRESSION_MS = 200;
-// Higher overlapFactor = lower latency (more frequent inference windows), so a
-// quick word is picked up fast. The shared cooldown below prevents one word
-// from firing twice across consecutive windows.
+// Edge-detection thresholds. The model scores a rolling ~1s of audio, so a
+// single word appears above threshold across several overlapping windows. We
+// fire once when the score RISES past FIRE_THRESHOLD, then refuse to fire again
+// until it FALLS below REARM_THRESHOLD (the word ended / brief silence). This
+// gives exactly one decision per word while still allowing rapid distinct words.
+const FIRE_THRESHOLD = 0.85;
+const REARM_THRESHOLD = 0.4;
+// Higher overlapFactor = more frequent inference windows = snappier detection
+// of both the rising edge and the silence that re-arms it.
 const OVERLAP_FACTOR = 0.75;
-// Cooldown after a fired decision: long enough that a single ~0.3s word can't
-// re-trigger on its trailing window, short enough to allow rapid distinct
-// words (~2 per second). This is the main rapid-fire knob.
-const COOLDOWN_MS = 450;
+// Tiny floor between fires to absorb score jitter at the threshold.
+const MIN_GAP_MS = 250;
 
 export type VoiceStatus = "idle" | "loading" | "listening" | "paused" | "error";
 
@@ -56,8 +56,26 @@ let sharedRecognizer: SC.SpeechCommandRecognizer | null = null;
 let recognizerPromise: Promise<SC.SpeechCommandRecognizer> | null = null;
 let isRegistered = false;
 let lastFireAt = 0;
+// Edge-detection gate: true when ready to fire (score has fallen since the last
+// fire), false while a word is still "held" above the re-arm threshold.
+let armed = true;
 // The currently-mounted hook instance that should receive detections.
 let activeOnDetect: ((decision: Decision) => void) | null = null;
+
+/**
+ * Loads TensorFlow.js and the speech model ahead of time (no microphone
+ * access), so voice is instant once the user starts culling. Safe to call
+ * repeatedly — the work is memoized. Resolves true on success, false if the
+ * model fails to load (the app still works via buttons/keyboard).
+ */
+export async function preloadKeywordSpotter(): Promise<boolean> {
+  try {
+    await getRecognizer();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function getRecognizer(): Promise<SC.SpeechCommandRecognizer> {
   if (sharedRecognizer) return sharedRecognizer;
@@ -88,26 +106,37 @@ async function ensureListening(): Promise<void> {
   const keepIdx = words.indexOf(KEEP_WORD);
   const rejectIdx = words.indexOf(REJECT_WORD);
 
+  // Start armed so the first word fires immediately.
+  armed = true;
+  lastFireAt = 0;
+
   await recognizer.listen(
     async (result) => {
       const scores = result.scores as Float32Array;
       const keepScore = keepIdx >= 0 ? scores[keepIdx] : 0;
       const rejectScore = rejectIdx >= 0 ? scores[rejectIdx] : 0;
-      if (keepScore < PROB_THRESHOLD && rejectScore < PROB_THRESHOLD) return;
+      const best = Math.max(keepScore, rejectScore);
 
-      // One-utterance-one-decision: a single word spans several overlapping
-      // windows, so ignore anything within the shared cooldown.
+      // Re-arm once the word has clearly ended (score fell back down).
+      if (best < REARM_THRESHOLD) {
+        armed = true;
+        return;
+      }
+
+      // Only fire on the rising edge of a new word, with a small jitter floor.
       const now = Date.now();
-      if (now - lastFireAt < COOLDOWN_MS) return;
-      lastFireAt = now;
+      if (!armed || best < FIRE_THRESHOLD || now - lastFireAt < MIN_GAP_MS) return;
 
+      armed = false;
+      lastFireAt = now;
       activeOnDetect?.(keepScore >= rejectScore ? "keep" : "reject");
     },
     {
-      probabilityThreshold: PROB_THRESHOLD,
-      invokeCallbackOnNoiseAndUnknown: false,
+      // Fire the callback on every window (including noise/unknown) so we can
+      // observe the score rising and falling for clean edge detection.
+      probabilityThreshold: 0,
+      invokeCallbackOnNoiseAndUnknown: true,
       overlapFactor: OVERLAP_FACTOR,
-      suppressionTimeMillis: SUPPRESSION_MS,
     },
   );
   isRegistered = true;
