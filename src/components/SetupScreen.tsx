@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Tutorial } from "./Tutorial";
 import { isConfigured, signIn } from "../drive/auth";
 import { findOrCreateFolder, listImages, type DriveFolder } from "../drive/driveApi";
@@ -22,16 +22,15 @@ const TUTORIAL_SEEN_KEY = "vpc.tutorialSeen";
 
 export function SetupScreen({ onStart }: SetupScreenProps) {
   const [mode, setMode] = useState<Mode>("choose");
-  const [tutorialOpen, setTutorialOpen] = useState(false);
-
-  // Auto-show the tutorial the first time the app is opened.
-  useEffect(() => {
+  // Auto-show the tutorial the first time the app is opened (lazy-read so we
+  // don't trigger an extra render via an effect).
+  const [tutorialOpen, setTutorialOpen] = useState<boolean>(() => {
     try {
-      if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) setTutorialOpen(true);
+      return !localStorage.getItem(TUTORIAL_SEEN_KEY);
     } catch {
-      // localStorage may be unavailable (private mode); skip auto-show.
+      return false;
     }
-  }, []);
+  });
 
   const closeTutorial = () => {
     setTutorialOpen(false);

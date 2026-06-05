@@ -34,7 +34,9 @@ export function GalleryView({ source, onExit }: GalleryViewProps) {
   }, []);
 
   const decideRef = useRef(session.decide);
-  decideRef.current = session.decide;
+  useEffect(() => {
+    decideRef.current = session.decide;
+  });
 
   const handleDecision = useCallback(
     (decision: Decision) => {
@@ -53,9 +55,11 @@ export function GalleryView({ source, onExit }: GalleryViewProps) {
 
   // Start/stop the mic to match the selected input mode.
   const voiceStartRef = useRef(voice.start);
-  voiceStartRef.current = voice.start;
   const voicePauseRef = useRef(voice.pause);
-  voicePauseRef.current = voice.pause;
+  useEffect(() => {
+    voiceStartRef.current = voice.start;
+    voicePauseRef.current = voice.pause;
+  });
   useEffect(() => {
     if (voiceEnabled) void voiceStartRef.current();
     else void voicePauseRef.current();

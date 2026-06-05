@@ -66,10 +66,8 @@ function Thumb({ id, source }: { id: string; source: PhotoSource }) {
   const [src, setSrc] = useState<string | undefined>(() => thumbCache.get(id));
 
   useEffect(() => {
-    if (thumbCache.has(id)) {
-      setSrc(thumbCache.get(id));
-      return;
-    }
+    // Already cached (also covered by the lazy initial state) — nothing to load.
+    if (thumbCache.has(id)) return;
     let cancelled = false;
     source
       .getThumb(id)

@@ -125,7 +125,9 @@ export function useKeywordSpotter({ onDetect }: UseKeywordSpotterOptions) {
   const [error, setError] = useState<string | null>(null);
 
   const onDetectRef = useRef(onDetect);
-  onDetectRef.current = onDetect;
+  useEffect(() => {
+    onDetectRef.current = onDetect;
+  });
 
   const start = useCallback(async () => {
     // Route detections to this (the live) hook instance.

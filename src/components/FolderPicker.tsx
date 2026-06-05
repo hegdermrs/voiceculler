@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFolder, getFolder, listFolders, type DriveFolder } from "../drive/driveApi";
+import { createFolder, listFolders, type DriveFolder } from "../drive/driveApi";
 
 interface Crumb {
   id: string;
@@ -27,6 +27,9 @@ export function FolderPicker({ onSelect, allowCreate = true, selectLabel = "Use 
 
   useEffect(() => {
     let cancelled = false;
+    // Intentional data-fetch pattern: show the loading state immediately, then
+    // populate results when the Drive request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
     listFolders(currentId)
@@ -155,10 +158,4 @@ function FolderIcon() {
       />
     </svg>
   );
-}
-
-// Re-export for convenience in the setup screen.
-export async function resolveFolderName(id: string): Promise<string> {
-  const meta = await getFolder(id);
-  return meta.name;
 }

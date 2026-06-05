@@ -42,9 +42,11 @@ export function useCullingSession(source: PhotoSource): CullingSession {
   const blobCacheRef = useRef<Map<string, string>>(new Map());
 
   const statesRef = useRef(states);
-  statesRef.current = states;
   const indexRef = useRef(currentIndex);
-  indexRef.current = currentIndex;
+  useEffect(() => {
+    statesRef.current = states;
+    indexRef.current = currentIndex;
+  });
 
   const updateState = useCallback((photoId: string, patch: Partial<PhotoState>) => {
     setStates((prev) =>
@@ -144,6 +146,7 @@ export function useCullingSession(source: PhotoSource): CullingSession {
         .getFullImage(s.photo.id)
         .then((url) => {
           blobCacheRef.current.set(s.photo.id, url);
+          // Reflect the async-loaded blob in state so the stage re-renders.
           updateState(s.photo.id, { fullSrc: url });
         })
         .catch((err) => {
@@ -159,6 +162,8 @@ export function useCullingSession(source: PhotoSource): CullingSession {
       if (!s.fullSrc) continue;
       URL.revokeObjectURL(s.fullSrc);
       blobCacheRef.current.delete(s.photo.id);
+      // Drop the freed URL from state to bound memory on large folders.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       updateState(s.photo.id, { fullSrc: undefined });
     }
   }, [currentIndex, states, source, updateState]);
