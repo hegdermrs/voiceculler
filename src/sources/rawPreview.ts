@@ -85,3 +85,32 @@ export async function extractRawPreviewBlob(file: File | Blob): Promise<Blob> {
 export function previewCacheFileName(rawFileName: string): string {
   return `${rawFileName}.preview.jpg`;
 }
+
+/** Max long edge for culling previews — viewable on screen, not print quality. */
+export const VIEW_PREVIEW_MAX_EDGE = 960;
+
+export const VIEW_PREVIEW_JPEG_QUALITY = 0.55;
+
+/** Rebuild on-disk cache files larger than this (legacy full-resolution previews). */
+export const VIEW_PREVIEW_MAX_BYTES = 350_000;
+
+/** Downscale and recompress any image to a small JPEG suitable for culling. */
+export async function toViewablePreviewBlob(source: Blob): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(source);
+    const scale = Math.min(1, VIEW_PREVIEW_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return await canvas.convertToBlob({
+      type: "image/jpeg",
+      quality: VIEW_PREVIEW_JPEG_QUALITY,
+    });
+  } catch {
+    return source;
+  }
+}

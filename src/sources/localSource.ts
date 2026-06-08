@@ -3,10 +3,12 @@ import {
   extractRawPreviewBlob,
   isRawFile,
   previewCacheFileName,
+  toViewablePreviewBlob,
+  VIEW_PREVIEW_MAX_BYTES,
 } from "./rawPreview";
 
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp)$/i;
-const THUMB_MAX = 200;
+const THUMB_MAX = 160;
 /** Hidden folder for extracted RAW previews (created inside the photo folder). */
 export const PREVIEW_CACHE_DIR = ".voiceculler_previews";
 const PREP_CONCURRENCY = 4;
@@ -128,7 +130,7 @@ async function writeCacheFile(
   const cacheName = previewCacheFileName(rawName);
   const handle = await cacheDir.getFileHandle(cacheName, { create: true });
   const writable = await handle.createWritable();
-  await writable.write(blob);
+  await writable.write(await toViewablePreviewBlob(blob));
   await writable.close();
   return handle;
 }
@@ -150,7 +152,11 @@ async function parallelForEach<T>(
 
 /** True when an on-disk preview cache file is still valid for this RAW. */
 function isCacheStillValid(rawFile: File, cacheFile: File): boolean {
-  return cacheFile.size > 512 && cacheFile.lastModified >= rawFile.lastModified;
+  return (
+    cacheFile.size > 512 &&
+    cacheFile.size <= VIEW_PREVIEW_MAX_BYTES &&
+    cacheFile.lastModified >= rawFile.lastModified
+  );
 }
 
 export interface PrebuiltPreviewCache {
@@ -224,7 +230,10 @@ export async function buildPreviewCache(
   });
 
   for (const entry of picked.entries) {
-    if (entry.sidecarHandle) previewHandles.set(entry.name, entry.sidecarHandle);
+    if (!entry.sidecarHandle) continue;
+    const sidecarFile = await entry.sidecarHandle.getFile();
+    const cacheHandle = await writeCacheFile(cacheDir, entry.name, sidecarFile);
+    previewHandles.set(entry.name, cacheHandle);
   }
 
   return { previewHandles, extracted, skippedCache };
@@ -356,11 +365,12 @@ export class LocalSource implements PhotoSource {
     if (!handle) throw new Error(`No preview prepared for ${id}`);
 
     const file = await handle.getFile();
-    const url = URL.createObjectURL(file);
+    const viewBlob = await toViewablePreviewBlob(file);
+    const url = URL.createObjectURL(viewBlob);
     this.previewUrls.set(id, url);
     this.objectUrls.add(url);
 
-    const thumbUrl = await makeThumbUrl(file);
+    const thumbUrl = await makeThumbUrl(viewBlob);
     this.thumbUrls.set(id, thumbUrl);
     this.objectUrls.add(thumbUrl);
   }
@@ -414,7 +424,7 @@ export class LocalSource implements PhotoSource {
     }
   }
 
-  /** Moves a sidecar JPEG into `.voiceculler_previews/` so Kept/Rejected stay RAW-only. */
+  /** Parks a compressed sidecar in `.voiceculler_previews/` and removes the full JPEG from the inbox. */
   private async parkSidecarInPreviewCache(entry: LocalEntry): Promise<void> {
     if (!entry.sidecarHandle || !entry.sidecarName) return;
     if (entry.dir !== this.srcDir) return;
@@ -422,15 +432,23 @@ export class LocalSource implements PhotoSource {
     const cacheDir = await this.srcDir.getDirectoryHandle(PREVIEW_CACHE_DIR, { create: true });
     const cacheName = previewCacheFileName(entry.name);
 
-    entry.sidecarHandle = await moveFileHandle(
-      entry.sidecarHandle,
-      entry.sidecarName,
-      this.srcDir,
-      cacheDir,
-      cacheName,
-    );
+    try {
+      await cacheDir.getFileHandle(cacheName);
+    } catch {
+      const sidecarFile = await entry.sidecarHandle.getFile();
+      await writeCacheFile(cacheDir, entry.name, sidecarFile);
+    }
+
+    try {
+      await this.srcDir.removeEntry(entry.sidecarName);
+    } catch {
+      // Sidecar may already have been removed.
+    }
+
+    const cacheHandle = await cacheDir.getFileHandle(cacheName);
+    entry.sidecarHandle = cacheHandle;
     entry.sidecarName = cacheName;
-    this.previewHandles.set(entry.name, entry.sidecarHandle);
+    this.previewHandles.set(entry.name, cacheHandle);
   }
 
   /** Restores a parked sidecar JPEG next to the RAW in the source folder (revert). */
@@ -491,7 +509,7 @@ async function makeThumbUrl(file: Blob): Promise<string> {
     if (!ctx) throw new Error("no 2d context");
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
-    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 });
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.55 });
     return URL.createObjectURL(blob);
   } catch {
     return URL.createObjectURL(file);
