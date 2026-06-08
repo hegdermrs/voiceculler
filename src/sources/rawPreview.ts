@@ -81,18 +81,18 @@ export async function extractRawPreviewBlob(file: File | Blob): Promise<Blob> {
   throw new Error("No embedded JPEG preview found in this RAW file.");
 }
 
-/** Cache file name for a RAW inside `.voiceculler_previews/`. */
-export function previewCacheFileName(rawFileName: string): string {
-  return `${rawFileName}.preview.jpg`;
-}
-
 /** Max long edge for culling previews — viewable on screen, not print quality. */
-export const VIEW_PREVIEW_MAX_EDGE = 960;
+export const VIEW_PREVIEW_MAX_EDGE = 1440;
 
-export const VIEW_PREVIEW_JPEG_QUALITY = 0.55;
+export const VIEW_PREVIEW_JPEG_QUALITY = 0.62;
 
 /** Rebuild on-disk cache files larger than this (legacy full-resolution previews). */
-export const VIEW_PREVIEW_MAX_BYTES = 350_000;
+export const VIEW_PREVIEW_MAX_BYTES = 700_000;
+
+/** Cache file name for a RAW inside `.voiceculler_previews/`. */
+export function previewCacheFileName(rawFileName: string): string {
+  return `${rawFileName}.preview_${VIEW_PREVIEW_MAX_EDGE}.jpg`;
+}
 
 /** Downscale and recompress any image to a small JPEG suitable for culling. */
 export async function toViewablePreviewBlob(source: Blob): Promise<Blob> {

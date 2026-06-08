@@ -8,7 +8,7 @@ import {
 } from "./rawPreview";
 
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp)$/i;
-const THUMB_MAX = 160;
+const THUMB_MAX = 200;
 /** Hidden folder for extracted RAW previews (created inside the photo folder). */
 export const PREVIEW_CACHE_DIR = ".voiceculler_previews";
 const PREP_CONCURRENCY = 4;
@@ -509,7 +509,7 @@ async function makeThumbUrl(file: Blob): Promise<string> {
     if (!ctx) throw new Error("no 2d context");
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
-    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.55 });
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.62 });
     return URL.createObjectURL(blob);
   } catch {
     return URL.createObjectURL(file);
