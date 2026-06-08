@@ -1,26 +1,30 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Tutorial } from "./Tutorial";
 import { isConfigured, signIn } from "../drive/auth";
 import { findOrCreateFolder, listImages, type DriveFolder } from "../drive/driveApi";
 import { FolderPicker } from "./FolderPicker";
 import { DriveSource } from "../sources/driveSource";
 import {
-  createLocalSource,
+  buildPreviewCache,
+  prepareLocalSource,
   isFileSystemAccessSupported,
   openImageFolder,
   type PickedFolder,
+  type PrebuiltPreviewCache,
+  type PrepareProgress,
 } from "../sources/localSource";
 import type { PhotoSource } from "../types";
 
 interface SetupScreenProps {
   onStart: (source: PhotoSource) => void;
+  onPreparing?: (progress: PrepareProgress | null, photoCount: number) => void;
 }
 
 type Mode = "choose" | "local" | "drive";
 
 const TUTORIAL_SEEN_KEY = "vpc.tutorialSeen";
 
-export function SetupScreen({ onStart }: SetupScreenProps) {
+export function SetupScreen({ onStart, onPreparing }: SetupScreenProps) {
   const [mode, setMode] = useState<Mode>("choose");
   // Auto-show the tutorial the first time the app is opened (lazy-read so we
   // don't trigger an extra render via an effect).
@@ -60,7 +64,13 @@ export function SetupScreen({ onStart }: SetupScreenProps) {
         </header>
 
         {mode === "choose" && <SourceChooser onPick={setMode} />}
-        {mode === "local" && <LocalSetup onStart={onStart} onBack={() => setMode("choose")} />}
+        {mode === "local" && (
+          <LocalSetup
+            onStart={onStart}
+            onPreparing={onPreparing}
+            onBack={() => setMode("choose")}
+          />
+        )}
         {mode === "drive" && <DriveSetup onStart={onStart} onBack={() => setMode("choose")} />}
       </div>
 
@@ -120,9 +130,11 @@ function SourceChooser({ onPick }: { onPick: (m: Mode) => void }) {
 
 function LocalSetup({
   onStart,
+  onPreparing,
   onBack,
 }: {
   onStart: (source: PhotoSource) => void;
+  onPreparing?: (progress: PrepareProgress | null, photoCount: number) => void;
   onBack: () => void;
 }) {
   const [picked, setPicked] = useState<PickedFolder | null>(null);
@@ -131,10 +143,54 @@ function LocalSetup({
   const [choosing, setChoosing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bgPrep, setBgPrep] = useState<PrepareProgress | null>(null);
+  const prepPromiseRef = useRef<Promise<PrebuiltPreviewCache> | null>(null);
+  const prepFolderRef = useRef<PickedFolder | null>(null);
+
+  const photoCount = picked?.entries.length ?? 0;
+  const rawCount = picked?.rawCount ?? 0;
+  const sidecarCount = picked?.sidecarCount ?? 0;
+
+  const startBackgroundPrep = (folder: PickedFolder) => {
+    prepFolderRef.current = folder;
+    const rawsToBuild = folder.rawCount - folder.sidecarCount;
+    if (rawsToBuild <= 0) {
+      prepPromiseRef.current = Promise.resolve({
+        previewHandles: new Map(
+          folder.entries
+            .filter((e) => e.sidecarHandle)
+            .map((e) => [e.name, e.sidecarHandle!] as const),
+        ),
+        extracted: 0,
+        skippedCache: 0,
+      });
+      setBgPrep(null);
+      return;
+    }
+
+    setBgPrep({
+      phase: "preparing",
+      done: 0,
+      total: rawsToBuild,
+      sidecarHits: folder.sidecarCount,
+      extracted: 0,
+      skippedCache: 0,
+    });
+
+    prepPromiseRef.current = buildPreviewCache(folder, (progress) => {
+      if (prepFolderRef.current === folder) setBgPrep(progress);
+    }).then((result) => {
+      if (prepFolderRef.current === folder) setBgPrep(null);
+      return result;
+    });
+  };
 
   const handleChoose = async () => {
     setError(null);
     setChoosing(true);
+    prepPromiseRef.current = null;
+    prepFolderRef.current = null;
+    setBgPrep(null);
     try {
       const result = await openImageFolder();
       if (result.entries.length === 0) {
@@ -143,8 +199,8 @@ function LocalSetup({
         return;
       }
       setPicked(result);
+      startBackgroundPrep(result);
     } catch (e) {
-      // The user cancelling the picker throws an AbortError; ignore it.
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -167,9 +223,25 @@ function LocalSetup({
     setError(null);
     setStarting(true);
     try {
-      const source = await createLocalSource(picked, kept, rejected);
+      const prebuilt = prepPromiseRef.current
+        ? await prepPromiseRef.current
+        : await buildPreviewCache(picked, (progress) => {
+            onPreparing?.(progress, picked.entries.length);
+          });
+
+      const source = await prepareLocalSource(
+        picked,
+        kept,
+        rejected,
+        (progress) => {
+          onPreparing?.(progress, picked.entries.length);
+        },
+        prebuilt,
+      );
+      onPreparing?.(null, 0);
       onStart(source);
     } catch (e) {
+      onPreparing?.(null, 0);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setStarting(false);
@@ -186,21 +258,40 @@ function LocalSetup({
         <p className="mb-3 text-sm text-neutral-500">
           Pick a folder on this computer. You'll be asked to grant read/write access. Nothing is
           uploaded. JPEG, PNG, WebP and camera RAW (CR2, CR3, NEF, ARW, RAF, DNG…) are supported.
+          Place a matching JPEG sidecar next to each RAW (e.g.{" "}
+          <span className="text-neutral-400">IMG_0001.jpg</span> beside{" "}
+          <span className="text-neutral-400">IMG_0001.CR3</span>) for instant CR3 previews. Other
+          RAWs are prepared into <span className="text-neutral-400">.voiceculler_previews/</span>.
         </p>
         {picked ? (
-          <div className="flex items-center justify-between gap-3 rounded-md bg-neutral-900 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm text-neutral-200">{picked.dir.name}</p>
-              <p className="text-xs text-neutral-500">{picked.entries.length} photos</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 rounded-md bg-neutral-900 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm text-neutral-200">{picked.dir.name}</p>
+                <p className="text-xs text-neutral-500">
+                  {photoCount} photos
+                  {rawCount > 0 &&
+                    ` · ${rawCount} RAW${sidecarCount > 0 ? ` (${sidecarCount} with JPEG sidecar)` : ""}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleChoose}
+                disabled={choosing || Boolean(bgPrep)}
+                className="shrink-0 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
+              >
+                Change
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleChoose}
-              disabled={choosing}
-              className="shrink-0 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
-            >
-              Change
-            </button>
+            {bgPrep && (
+              <p className="text-xs text-neutral-400">
+                Preparing RAW previews in background… {bgPrep.done}/{bgPrep.total}
+                {bgPrep.skippedCache > 0 && ` (${bgPrep.skippedCache} already cached)`}
+              </p>
+            )}
+            {!bgPrep && rawCount > 0 && (
+              <p className="text-xs text-keep">RAW previews ready.</p>
+            )}
           </div>
         ) : (
           <button
@@ -216,8 +307,9 @@ function LocalSetup({
 
       <Step n={2} title="Output subfolder names" done={Boolean(picked)} disabled={!picked}>
         <p className="mb-3 text-sm text-neutral-500">
-          Kept and rejected photos move into these subfolders inside the chosen folder. They're
-          created automatically if they don't exist.
+          Kept and rejected folders hold your RAW/JPEG masters only. Preview JPEG sidecars stay in{" "}
+          <span className="text-neutral-400">.voiceculler_previews/</span> so output folders are not
+          cluttered. Created automatically inside the chosen folder if they do not exist.
         </p>
         <div className="grid grid-cols-2 gap-3">
           <NameField label="Kept" accent="keep" value={keptName} onChange={setKeptName} />
@@ -233,10 +325,10 @@ function LocalSetup({
       <button
         type="button"
         onClick={handleStart}
-        disabled={!picked || starting}
+        disabled={!picked || starting || Boolean(bgPrep)}
         className="w-full rounded-md bg-keep px-4 py-3 text-base font-semibold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
       >
-        {starting ? "Starting…" : "Start culling"}
+        {starting ? "Preparing…" : bgPrep ? "Building previews…" : "Start culling"}
       </button>
     </div>
   );
