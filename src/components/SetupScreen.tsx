@@ -1,26 +1,32 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Tutorial } from "./Tutorial";
 import { isConfigured, signIn } from "../drive/auth";
 import { findOrCreateFolder, listImages, type DriveFolder } from "../drive/driveApi";
 import { FolderPicker } from "./FolderPicker";
 import { DriveSource } from "../sources/driveSource";
+import { isDesktopApp } from "../desktop/isDesktop";
 import {
-  createLocalSource,
+  buildPreviewCache,
+  prepareLocalSource,
   isFileSystemAccessSupported,
   openImageFolder,
   type PickedFolder,
+  type PrebuiltPreviewCache,
+  type PrepareProgress,
 } from "../sources/localSource";
+import type { DesktopPickedFolder } from "../sources/desktopSource";
 import type { PhotoSource } from "../types";
 
 interface SetupScreenProps {
   onStart: (source: PhotoSource) => void;
+  onPreparing?: (progress: PrepareProgress | null, photoCount: number) => void;
 }
 
 type Mode = "choose" | "local" | "drive";
 
 const TUTORIAL_SEEN_KEY = "vpc.tutorialSeen";
 
-export function SetupScreen({ onStart }: SetupScreenProps) {
+export function SetupScreen({ onStart, onPreparing }: SetupScreenProps) {
   const [mode, setMode] = useState<Mode>("choose");
   // Auto-show the tutorial the first time the app is opened (lazy-read so we
   // don't trigger an extra render via an effect).
@@ -60,7 +66,9 @@ export function SetupScreen({ onStart }: SetupScreenProps) {
         </header>
 
         {mode === "choose" && <SourceChooser onPick={setMode} />}
-        {mode === "local" && <LocalSetup onStart={onStart} onBack={() => setMode("choose")} />}
+        {mode === "local" && (
+          <LocalSetup onStart={onStart} onPreparing={onPreparing} onBack={() => setMode("choose")} />
+        )}
         {mode === "drive" && <DriveSetup onStart={onStart} onBack={() => setMode("choose")} />}
       </div>
 
@@ -70,7 +78,7 @@ export function SetupScreen({ onStart }: SetupScreenProps) {
 }
 
 function SourceChooser({ onPick }: { onPick: (m: Mode) => void }) {
-  const localOk = isFileSystemAccessSupported();
+  const localOk = isDesktopApp() || isFileSystemAccessSupported();
   return (
     <div>
       <button
@@ -120,22 +128,132 @@ function SourceChooser({ onPick }: { onPick: (m: Mode) => void }) {
 
 function LocalSetup({
   onStart,
+  onPreparing,
   onBack,
 }: {
   onStart: (source: PhotoSource) => void;
+  onPreparing?: (progress: PrepareProgress | null, photoCount: number) => void;
   onBack: () => void;
 }) {
+  const desktop = isDesktopApp();
   const [picked, setPicked] = useState<PickedFolder | null>(null);
+  const [desktopPicked, setDesktopPicked] = useState<DesktopPickedFolder | null>(null);
   const [keptName, setKeptName] = useState("Kept");
   const [rejectedName, setRejectedName] = useState("Rejected");
   const [choosing, setChoosing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bgPrep, setBgPrep] = useState<PrepareProgress | null>(null);
+  const prepPromiseRef = useRef<Promise<PrebuiltPreviewCache> | null>(null);
+  const desktopPrepRef = useRef<Promise<void> | null>(null);
+  const prepFolderRef = useRef<PickedFolder | null>(null);
+  const prepDesktopRef = useRef<DesktopPickedFolder | null>(null);
+
+  const photoCount = desktopPicked?.entries.length ?? picked?.entries.length ?? 0;
+  const rawCount = desktopPicked?.rawCount ?? picked?.rawCount ?? 0;
+  const sidecarCount = desktopPicked?.sidecarCount ?? picked?.sidecarCount ?? 0;
+  const folderLabel = desktopPicked?.name ?? picked?.dir.name;
+  const hasFolder = Boolean(desktopPicked ?? picked);
+
+  const startBackgroundPrepWeb = (folder: PickedFolder) => {
+    prepFolderRef.current = folder;
+    const rawsToBuild = folder.rawCount - folder.sidecarCount;
+    if (rawsToBuild <= 0) {
+      prepPromiseRef.current = Promise.resolve({
+        previewHandles: new Map(
+          folder.entries
+            .filter((e) => e.sidecarHandle)
+            .map((e) => [e.name, e.sidecarHandle!] as const),
+        ),
+        extracted: 0,
+        skippedCache: 0,
+      });
+      setBgPrep(null);
+      return;
+    }
+
+    setBgPrep({
+      phase: "preparing",
+      done: 0,
+      total: rawsToBuild,
+      sidecarHits: folder.sidecarCount,
+      extracted: 0,
+      skippedCache: 0,
+    });
+
+    prepPromiseRef.current = buildPreviewCache(folder, (progress) => {
+      if (prepFolderRef.current === folder) setBgPrep(progress);
+    }).then((result) => {
+      if (prepFolderRef.current === folder) setBgPrep(null);
+      return result;
+    });
+  };
+
+  const startBackgroundPrepDesktop = (folder: DesktopPickedFolder) => {
+    prepDesktopRef.current = folder;
+
+    desktopPrepRef.current = import("../sources/desktopSource")
+      .then(async ({ runExifToolExtract, rescanDesktopFolder, rawPathsNeedingExtract }) => {
+        const fresh = await rescanDesktopFolder(folder.path);
+        const rawPaths = rawPathsNeedingExtract(fresh.entries);
+        if (rawPaths.length === 0) {
+          if (prepDesktopRef.current === folder) setBgPrep(null);
+          return;
+        }
+
+        if (prepDesktopRef.current === folder) {
+          setBgPrep({
+            phase: "preparing",
+            done: 0,
+            total: rawPaths.length,
+            sidecarHits: fresh.sidecarCount,
+            extracted: 0,
+            skippedCache: 0,
+          });
+        }
+
+        const result = await runExifToolExtract(rawPaths);
+        if (!result.ok) throw new Error(result.message);
+
+        if (prepDesktopRef.current === folder) {
+          setBgPrep({
+            phase: "preparing",
+            done: rawPaths.length,
+            total: rawPaths.length,
+            sidecarHits: fresh.sidecarCount,
+            extracted: rawPaths.length,
+            skippedCache: 0,
+          });
+          setBgPrep(null);
+        }
+      })
+      .catch((e) => {
+        if (prepDesktopRef.current === folder) {
+          setError(e instanceof Error ? e.message : String(e));
+          setBgPrep(null);
+        }
+      });
+  };
 
   const handleChoose = async () => {
     setError(null);
     setChoosing(true);
+    prepPromiseRef.current = null;
+    desktopPrepRef.current = null;
+    prepFolderRef.current = null;
+    prepDesktopRef.current = null;
+    setBgPrep(null);
     try {
+      if (desktop) {
+        const { openDesktopPhotoFolder } = await import("../sources/desktopSource");
+        const result = await openDesktopPhotoFolder();
+        if (!result) return;
+        setDesktopPicked(result);
+        setPicked(null);
+        startBackgroundPrepDesktop(result);
+        return;
+      }
+
       const result = await openImageFolder();
       if (result.entries.length === 0) {
         setError("No images found in that folder. Pick another one.");
@@ -143,6 +261,8 @@ function LocalSetup({
         return;
       }
       setPicked(result);
+      setDesktopPicked(null);
+      startBackgroundPrepWeb(result);
     } catch (e) {
       // The user cancelling the picker throws an AbortError; ignore it.
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -153,7 +273,7 @@ function LocalSetup({
   };
 
   const handleStart = async () => {
-    if (!picked) return;
+    if (!desktopPicked && !picked) return;
     const kept = keptName.trim();
     const rejected = rejectedName.trim();
     if (!kept || !rejected) {
@@ -167,9 +287,48 @@ function LocalSetup({
     setError(null);
     setStarting(true);
     try {
-      const source = await createLocalSource(picked, kept, rejected);
+      if (desktopPicked) {
+        if (desktopPrepRef.current) {
+          try {
+            await desktopPrepRef.current;
+          } catch (e) {
+            // Background prep already surfaced an error; don't proceed.
+            throw e;
+          }
+        }
+        const { prepareDesktopSource, rescanDesktopFolder } = await import("../sources/desktopSource");
+        const fresh = await rescanDesktopFolder(desktopPicked.path);
+        const source = await prepareDesktopSource(
+          fresh,
+          kept,
+          rejected,
+          (progress) => onPreparing?.(progress, fresh.entries.length),
+        );
+        onPreparing?.(null, 0);
+        onStart(source);
+        return;
+      }
+
+      if (!picked) return;
+      const prebuilt = prepPromiseRef.current
+        ? await prepPromiseRef.current
+        : await buildPreviewCache(picked, (progress) => {
+            onPreparing?.(progress, picked.entries.length);
+          });
+
+      const source = await prepareLocalSource(
+        picked,
+        kept,
+        rejected,
+        (progress) => {
+          onPreparing?.(progress, picked.entries.length);
+        },
+        prebuilt,
+      );
+      onPreparing?.(null, 0);
       onStart(source);
     } catch (e) {
+      onPreparing?.(null, 0);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setStarting(false);
@@ -182,25 +341,44 @@ function LocalSetup({
 
       {error && <ErrorBox message={error} />}
 
-      <Step n={1} title="Choose photo folder" done={Boolean(picked)}>
+      <Step n={1} title="Choose photo folder" done={hasFolder}>
         <p className="mb-3 text-sm text-neutral-500">
-          Pick a folder on this computer. You'll be asked to grant read/write access. Nothing is
-          uploaded. JPEG, PNG, WebP and camera RAW (CR2, CR3, NEF, ARW, RAF, DNG…) are supported.
+          Pick a folder on this computer. Nothing is uploaded. JPEG, PNG, WebP and camera RAW
+          (CR2, CR3, NEF, ARW, RAF, DNG…) are supported.
+          {desktop
+            ? " Desktop mode uses ExifTool automatically for fast CR3 previews."
+            : " RAW files are prepared into `.voiceculler_previews/` before culling (only rebuilt if the RAW changes)."}
         </p>
-        {picked ? (
-          <div className="flex items-center justify-between gap-3 rounded-md bg-neutral-900 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm text-neutral-200">{picked.dir.name}</p>
-              <p className="text-xs text-neutral-500">{picked.entries.length} photos</p>
+        {hasFolder ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 rounded-md bg-neutral-900 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm text-neutral-200">{folderLabel}</p>
+                <p className="text-xs text-neutral-500">
+                  {photoCount} photos
+                  {rawCount > 0 &&
+                    ` · ${rawCount} RAW${sidecarCount > 0 ? ` (${sidecarCount} with JPEG sidecar)` : ""}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleChoose}
+                disabled={choosing || Boolean(bgPrep)}
+                className="shrink-0 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
+              >
+                Change
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleChoose}
-              disabled={choosing}
-              className="shrink-0 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
-            >
-              Change
-            </button>
+            {bgPrep && (
+              <p className="text-xs text-neutral-400">
+                {desktop ? "Running ExifTool…" : "Preparing RAW previews in background…"}{" "}
+                {bgPrep.done}/{bgPrep.total}
+                {!desktop && bgPrep.skippedCache > 0 && ` (${bgPrep.skippedCache} already cached)`}
+              </p>
+            )}
+            {!bgPrep && rawCount > 0 && (
+              <p className="text-xs text-keep">RAW previews ready.</p>
+            )}
           </div>
         ) : (
           <button
@@ -214,7 +392,7 @@ function LocalSetup({
         )}
       </Step>
 
-      <Step n={2} title="Output subfolder names" done={Boolean(picked)} disabled={!picked}>
+      <Step n={2} title="Output subfolder names" done={hasFolder} disabled={!hasFolder}>
         <p className="mb-3 text-sm text-neutral-500">
           Kept and rejected photos move into these subfolders inside the chosen folder. They're
           created automatically if they don't exist.
@@ -233,10 +411,10 @@ function LocalSetup({
       <button
         type="button"
         onClick={handleStart}
-        disabled={!picked || starting}
+        disabled={!hasFolder || starting || Boolean(bgPrep)}
         className="w-full rounded-md bg-keep px-4 py-3 text-base font-semibold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
       >
-        {starting ? "Starting…" : "Start culling"}
+        {starting ? "Preparing…" : bgPrep ? "Building previews…" : "Start culling"}
       </button>
     </div>
   );

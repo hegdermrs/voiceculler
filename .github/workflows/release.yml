@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mac_target:
+        description: Mac build type
+        required: true
+        default: apple-silicon
+        type: choice
+        options:
+          - apple-silicon
+          - universal
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust targets (universal Mac)
+        if: github.event_name == 'push' || github.event.inputs.mac_target == 'universal'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Mac app (Apple Silicon)
+        if: github.event_name == 'push' || github.event.inputs.mac_target == 'apple-silicon'
+        run: npm run tauri:build:mac
+
+      - name: Build Mac app (Universal — Apple Silicon + Intel)
+        if: github.event.inputs.mac_target == 'universal'
+        run: npm run tauri:build:mac-universal
+
+      - name: Stage Mac artifacts
+        run: |
+          mkdir -p release-artifacts/mac
+          shopt -s nullglob
+          for f in src-tauri/target/*/release/bundle/dmg/*.dmg; do
+            cp "$f" release-artifacts/mac/
+          done
+          for app in src-tauri/target/*/release/bundle/macos/*.app; do
+            ditto -c -k --sequesterRsrc --keepParent "$app" "release-artifacts/mac/$(basename "$app").zip"
+          done
+          ls -la release-artifacts/mac/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: release-artifacts/mac/
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run tauri:build
+
+      - name: Stage Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-artifacts/windows | Out-Null
+          Copy-Item src-tauri/target/release/bundle/msi/*.msi release-artifacts/windows/ -ErrorAction SilentlyContinue
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe release-artifacts/windows/ -ErrorAction SilentlyContinue
+          Get-ChildItem release-artifacts/windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release-artifacts/windows/
+          if-no-files-found: error
+
+  publish-release:
+    needs: [build-mac, build-windows]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/mac-installer/*
+            artifacts/windows-installer/*
+          generate_release_notes: true

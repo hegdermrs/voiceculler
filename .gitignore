@@ -12,3 +12,9 @@ tsconfig.tsbuildinfo
 # Local-only media (personal photos and unused audio samples)
 Input/
 resources/
+
+# Downloaded at build time — bundled inside the installer (do not commit)
+src-tauri/resources/exiftool/
+
+# Accidental ExifTool output in src-tauri root
+src-tauri/*.jpg
