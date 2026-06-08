@@ -27,12 +27,9 @@ const env = {
 };
 
 const args = process.argv.slice(2);
-const tauriBin =
-  process.platform === "win32"
-    ? join(nodeBin, "tauri.cmd")
-    : join(nodeBin, "tauri");
+const tauriCli = join(process.cwd(), "node_modules", "@tauri-apps", "cli", "tauri.js");
 
-const result = spawnSync(tauriBin, args, {
+const result = spawnSync(process.execPath, [tauriCli, ...args], {
   stdio: "inherit",
   env,
   shell: false,
