@@ -64,11 +64,28 @@ async function bundleFromBinaries() {
 
 async function download(url, dest) {
   console.log(`Downloading ${url}`);
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    redirect: "follow",
+    headers: { "User-Agent": "voice-photo-culler-build/1.0" },
+  });
   if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
   const body = res.body;
   if (!body) throw new Error(`Empty response: ${url}`);
   await pipeline(Readable.fromWeb(body), createWriteStream(dest));
+}
+
+async function downloadFirst(urls, dest) {
+  let lastErr;
+  for (const url of urls) {
+    try {
+      await download(url, dest);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(String(err));
+    }
+  }
+  throw lastErr ?? new Error(`All downloads failed: ${urls.join(", ")}`);
 }
 
 async function findChildDir(parent, prefix) {
@@ -83,23 +100,35 @@ async function findChildDir(parent, prefix) {
 async function bundleWindows() {
   const tmp = await mkdtemp(join(tmpdir(), "exiftool-win-"));
   const zipPath = join(tmp, "exiftool.zip");
-  await download(`https://exiftool.org/exiftool-${VERSION}_64.zip`, zipPath);
+  await downloadFirst(
+    [
+      `https://exiftool.org/exiftool-${VERSION}_64.zip`,
+      `https://sourceforge.net/projects/exiftool/files/exiftool-${VERSION}_64.zip/download`,
+    ],
+    zipPath,
+  );
 
   execSync(
     `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${tmp.replace(/'/g, "''")}' -Force"`,
     { stdio: "inherit" },
   );
 
-  const extracted = join(tmp, "exiftool_files");
-  const exeK = join(tmp, "exiftool(-k).exe");
-  const exePlain = join(tmp, "exiftool.exe");
+  const inner =
+    (await findChildDir(tmp, `exiftool-${VERSION}`)) ??
+    (await findChildDir(tmp, "exiftool")) ??
+    tmp;
 
-  // Zip layout: exiftool(-k).exe + exiftool_files/ at top level.
+  const extracted = join(inner, "exiftool_files");
+  const exeK = join(inner, "exiftool(-k).exe");
+  const exePlain = join(inner, "exiftool.exe");
+
+  // Zip layout: exiftool(-k).exe + exiftool_files/ (may be in a versioned subfolder).
   await cp(extracted, join(OUT_DIR, "exiftool_files"), { recursive: true });
+  const outExe = join(OUT_DIR, "exiftool.exe");
   try {
-    await rename(exeK, join(OUT_DIR, "exiftool.exe"));
+    await cp(exeK, outExe);
   } catch {
-    await cp(exePlain, join(OUT_DIR, "exiftool.exe"));
+    await cp(exePlain, outExe);
   }
 
   await rm(tmp, { recursive: true, force: true });
@@ -108,7 +137,13 @@ async function bundleWindows() {
 async function bundleMac() {
   const tmp = await mkdtemp(join(tmpdir(), "exiftool-mac-"));
   const tarPath = join(tmp, "exiftool.tar.gz");
-  await download(`https://exiftool.org/Image-ExifTool-${VERSION}.tar.gz`, tarPath);
+  await downloadFirst(
+    [
+      `https://exiftool.org/Image-ExifTool-${VERSION}.tar.gz`,
+      `https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${VERSION}.tar.gz/download`,
+    ],
+    tarPath,
+  );
 
   execSync(`tar -xzf "${tarPath}" -C "${tmp}"`, { stdio: "inherit" });
 
