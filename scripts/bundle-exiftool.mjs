@@ -6,7 +6,7 @@
  */
 import { execSync } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { access, cp, mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -74,11 +74,15 @@ async function download(url, dest) {
   await pipeline(Readable.fromWeb(body), createWriteStream(dest));
 }
 
-async function downloadFirst(urls, dest) {
+async function downloadFirst(urls, dest, minBytes = 512_000) {
   let lastErr;
   for (const url of urls) {
     try {
       await download(url, dest);
+      const size = (await stat(dest)).size;
+      if (size < minBytes) {
+        throw new Error(`Download too small (${size} bytes): ${url}`);
+      }
       return;
     } catch (err) {
       lastErr = err;
@@ -102,8 +106,8 @@ async function bundleWindows() {
   const zipPath = join(tmp, "exiftool.zip");
   await downloadFirst(
     [
-      `https://exiftool.org/exiftool-${VERSION}_64.zip`,
       `https://sourceforge.net/projects/exiftool/files/exiftool-${VERSION}_64.zip/download`,
+      `https://exiftool.org/exiftool-${VERSION}_64.zip`,
     ],
     zipPath,
   );
@@ -139,8 +143,8 @@ async function bundleMac() {
   const tarPath = join(tmp, "exiftool.tar.gz");
   await downloadFirst(
     [
-      `https://exiftool.org/Image-ExifTool-${VERSION}.tar.gz`,
       `https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${VERSION}.tar.gz/download`,
+      `https://exiftool.org/Image-ExifTool-${VERSION}.tar.gz`,
     ],
     tarPath,
   );
