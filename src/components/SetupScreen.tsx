@@ -47,31 +47,34 @@ export function SetupScreen({ onStart, onPreparing }: SetupScreenProps) {
 
   return (
     <div className="flex min-h-full items-center justify-center overflow-y-auto p-6">
-      <div className="w-full max-w-xl space-y-6">
-        <header className="space-y-2 text-center">
-          <h1 className="text-2xl font-semibold text-neutral-100">Voice Photo Culler</h1>
-          <p className="text-sm text-neutral-500">
-            Say <span className="text-keep">"Yes"</span> to keep or{" "}
-            <span className="text-reject">"No"</span> to reject — sort your photos hands-free.
+      <div className="w-full max-w-md">
+        <header className="mb-8 text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-50">Voice Photo Culler</h1>
+          <p className="mt-2 text-xs text-neutral-500">
+            <span className="text-keep">Yes</span>
+            <span className="mx-1.5 text-neutral-700">·</span>
+            <span className="text-reject">No</span>
           </p>
           <button
             type="button"
             onClick={() => setTutorialOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-neutral-300 ring-1 ring-neutral-800 hover:bg-neutral-800"
+            className="mt-3 text-xs text-neutral-500 underline-offset-2 hover:text-neutral-300 hover:underline"
           >
             How it works
           </button>
         </header>
 
-        {mode === "choose" && <SourceChooser onPick={setMode} />}
-        {mode === "local" && (
-          <LocalSetup
-            onStart={onStart}
-            onPreparing={onPreparing}
-            onBack={() => setMode("choose")}
-          />
-        )}
-        {mode === "drive" && <DriveSetup onStart={onStart} onBack={() => setMode("choose")} />}
+        <div className="rounded-2xl border border-neutral-800/80 bg-neutral-950/60 p-5 shadow-xl shadow-black/20">
+          {mode === "choose" && <SourceChooser onPick={setMode} />}
+          {mode === "local" && (
+            <LocalSetup
+              onStart={onStart}
+              onPreparing={onPreparing}
+              onBack={() => setMode("choose")}
+            />
+          )}
+          {mode === "drive" && <DriveSetup onStart={onStart} onBack={() => setMode("choose")} />}
+        </div>
       </div>
 
       <Tutorial open={tutorialOpen} onClose={closeTutorial} />
@@ -82,47 +85,46 @@ export function SetupScreen({ onStart, onPreparing }: SetupScreenProps) {
 function SourceChooser({ onPick }: { onPick: (m: Mode) => void }) {
   const localOk = isFileSystemAccessSupported();
   return (
-    <div>
+    <div className="space-y-3">
       <button
         type="button"
         onClick={() => onPick("local")}
         disabled={!localOk}
-        className="w-full rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 text-left transition hover:border-neutral-700 hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-40"
+        className="group flex w-full items-center gap-4 rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-3.5 text-left transition hover:border-neutral-700 hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <div className="flex items-center justify-between">
-          <span className="text-base font-medium text-neutral-100">Local folder</span>
-          <span className="rounded-full bg-keep/15 px-2 py-0.5 text-xs font-medium text-keep">
-            Fastest
-          </span>
-        </div>
-        <p className="mt-1 text-sm text-neutral-500">
-          Cull photos straight from a folder on this computer. Nothing is uploaded.
-          {!localOk && " (Requires Chrome or Edge.)"}
-        </p>
-      </button>
-
-      <div className="flex items-center gap-4 py-4" aria-hidden="true">
-        <span className="h-px flex-1 bg-neutral-800" />
-        <span className="text-sm font-semibold uppercase tracking-widest text-neutral-500">
-          or
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-300 group-hover:bg-neutral-700">
+          <FolderIcon />
         </span>
-        <span className="h-px flex-1 bg-neutral-800" />
-      </div>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="font-medium text-neutral-100">Local folder</span>
+            <span className="rounded bg-keep/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-keep">
+              Recommended
+            </span>
+          </span>
+          {!localOk && (
+            <span className="mt-0.5 block text-xs text-neutral-500">Chrome or Edge required</span>
+          )}
+        </span>
+        <ChevronIcon />
+      </button>
 
       <div
         aria-disabled="true"
         title="Coming soon"
-        className="w-full cursor-not-allowed rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 text-left opacity-50"
+        className="flex w-full cursor-not-allowed items-center gap-4 rounded-xl border border-neutral-800/60 bg-neutral-900/20 px-4 py-3.5 opacity-40"
       >
-        <div className="flex items-center justify-between">
-          <span className="text-base font-medium text-neutral-100">Google Drive</span>
-          <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-xs font-medium text-neutral-400">
-            Coming soon
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-500">
+          <CloudIcon />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="font-medium text-neutral-300">Google Drive</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+              Soon
+            </span>
           </span>
-        </div>
-        <p className="mt-1 text-sm text-neutral-500">
-          Connect a Drive folder and sort photos into Drive subfolders.
-        </p>
+        </span>
       </div>
     </div>
   );
@@ -254,43 +256,29 @@ function LocalSetup({
 
       {error && <ErrorBox message={error} />}
 
-      <Step n={1} title="Choose photo folder" done={Boolean(picked)}>
-        <p className="mb-3 text-sm text-neutral-500">
-          Pick a folder on this computer. You'll be asked to grant read/write access. Nothing is
-          uploaded. JPEG, PNG, WebP and camera RAW (CR2, CR3, NEF, ARW, RAF, DNG…) are supported.
-          Place a matching JPEG sidecar next to each RAW (e.g.{" "}
-          <span className="text-neutral-400">IMG_0001.jpg</span> beside{" "}
-          <span className="text-neutral-400">IMG_0001.CR3</span>) for instant CR3 previews. Other
-          RAWs are prepared into <span className="text-neutral-400">.voiceculler_previews/</span>.
-        </p>
+      <Step n={1} title="Photo folder" done={Boolean(picked)}>
         {picked ? (
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3 rounded-md bg-neutral-900 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 rounded-lg bg-neutral-900 px-3 py-2.5 ring-1 ring-neutral-800">
               <div className="min-w-0">
-                <p className="truncate text-sm text-neutral-200">{picked.dir.name}</p>
-                <p className="text-xs text-neutral-500">
-                  {photoCount} photos
-                  {rawCount > 0 &&
-                    ` · ${rawCount} RAW${sidecarCount > 0 ? ` (${sidecarCount} with JPEG sidecar)` : ""}`}
+                <p className="truncate text-sm font-medium text-neutral-100">{picked.dir.name}</p>
+                <p className="text-xs tabular-nums text-neutral-500">
+                  {photoCount} files
+                  {rawCount > 0 && ` · ${rawCount} RAW`}
+                  {sidecarCount > 0 && ` · ${sidecarCount} sidecar`}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleChoose}
                 disabled={choosing || Boolean(bgPrep)}
-                className="shrink-0 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
+                className="shrink-0 rounded-md bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700 disabled:opacity-40"
               >
                 Change
               </button>
             </div>
             {bgPrep && (
-              <p className="text-xs text-neutral-400">
-                Preparing RAW previews in background… {bgPrep.done}/{bgPrep.total}
-                {bgPrep.skippedCache > 0 && ` (${bgPrep.skippedCache} already cached)`}
-              </p>
-            )}
-            {!bgPrep && rawCount > 0 && (
-              <p className="text-xs text-keep">RAW previews ready.</p>
+              <PrepBar done={bgPrep.done} total={bgPrep.total} label="Preparing RAW previews" />
             )}
           </div>
         ) : (
@@ -298,19 +286,14 @@ function LocalSetup({
             type="button"
             onClick={handleChoose}
             disabled={choosing}
-            className="rounded-md bg-neutral-800 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
+            className="w-full rounded-lg bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-100 hover:bg-neutral-700 disabled:opacity-40"
           >
             {choosing ? "Opening…" : "Choose folder"}
           </button>
         )}
       </Step>
 
-      <Step n={2} title="Output subfolder names" done={Boolean(picked)} disabled={!picked}>
-        <p className="mb-3 text-sm text-neutral-500">
-          Kept and rejected folders hold your RAW/JPEG masters only. Preview JPEG sidecars stay in{" "}
-          <span className="text-neutral-400">.voiceculler_previews/</span> so output folders are not
-          cluttered. Created automatically inside the chosen folder if they do not exist.
-        </p>
+      <Step n={2} title="Output folders" done={Boolean(picked)} disabled={!picked}>
         <div className="grid grid-cols-2 gap-3">
           <NameField label="Kept" accent="keep" value={keptName} onChange={setKeptName} />
           <NameField
@@ -326,9 +309,9 @@ function LocalSetup({
         type="button"
         onClick={handleStart}
         disabled={!picked || starting || Boolean(bgPrep)}
-        className="w-full rounded-md bg-keep px-4 py-3 text-base font-semibold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
+        className="w-full rounded-xl bg-keep py-3 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
       >
-        {starting ? "Preparing…" : bgPrep ? "Building previews…" : "Start culling"}
+        {starting ? "Starting…" : bgPrep ? "Preparing…" : "Start culling"}
       </button>
     </div>
   );
@@ -515,10 +498,60 @@ function BackButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="text-sm text-neutral-500 hover:text-neutral-300"
+      className="-ml-1 mb-1 flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-300"
     >
       ← Back
     </button>
+  );
+}
+
+function PrepBar({ done, total, label }: { done: number; total: number; label: string }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-[11px] text-neutral-500">
+        <span>{label}</span>
+        <span className="tabular-nums">
+          {done}/{total}
+        </span>
+      </div>
+      <div className="h-1 overflow-hidden rounded-full bg-neutral-800">
+        <div
+          className="h-full rounded-full bg-keep/80 transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M3 7a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    </svg>
+  );
+}
+
+function CloudIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M17.5 19H9a5 5 0 1 1 1.3-9.8A6 6 0 0 1 19 10.5a3.5 3.5 0 0 1 0 7" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 text-neutral-600"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   );
 }
 
@@ -553,7 +586,7 @@ function NameField({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-neutral-600"
+        className="mt-1.5 w-full rounded-lg bg-neutral-900 px-2.5 py-2 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-neutral-600"
       />
     </label>
   );
@@ -573,22 +606,16 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className={`rounded-lg border p-4 transition ${
-        disabled
-          ? "border-neutral-900 bg-neutral-950/40 opacity-50"
-          : "border-neutral-800 bg-neutral-900/40"
-      }`}
-    >
-      <div className="mb-3 flex items-center gap-2">
+    <section className={disabled ? "opacity-40" : ""}>
+      <div className="mb-2 flex items-center gap-2">
         <span
-          className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-            done ? "bg-keep text-black" : "bg-neutral-800 text-neutral-300"
+          className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+            done ? "bg-keep text-black" : "bg-neutral-800 text-neutral-400"
           }`}
         >
           {done ? "✓" : n}
         </span>
-        <h2 className="text-sm font-medium text-neutral-200">{title}</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">{title}</h2>
       </div>
       <div className={disabled ? "pointer-events-none" : ""}>{children}</div>
     </section>

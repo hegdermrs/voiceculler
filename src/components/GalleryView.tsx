@@ -94,7 +94,7 @@ export function GalleryView({ source, onExit }: GalleryViewProps) {
 
       {voice.status === "error" && (
         <div className="border-b border-amber-800/40 bg-amber-950/30 px-4 py-1.5 text-center text-xs text-amber-200">
-          Voice disabled ({voice.error}). Use the buttons or keyboard instead.
+          Voice unavailable — use keys or buttons.
         </div>
       )}
       {voice.status === "loading" && (

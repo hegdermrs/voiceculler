@@ -52,8 +52,7 @@ export function ShortcutsOverlay({ open, onClose, isMac }: ShortcutsOverlayProps
           ))}
         </ul>
         <p className="mt-4 text-xs text-neutral-500">
-          Or just say <span className="text-keep">"Yes"</span> (keep) /{" "}
-          <span className="text-reject">"No"</span> (reject) out loud.
+          Voice: <span className="text-keep">Yes</span> / <span className="text-reject">No</span>
         </p>
       </div>
     </div>

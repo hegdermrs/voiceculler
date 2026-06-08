@@ -12,101 +12,37 @@ interface Slide {
 
 const SLIDES: Slide[] = [
   {
-    title: "Welcome 👋",
+    title: "Cull photos",
     body: (
-      <p>
-        This app helps you <strong className="text-neutral-100">cull photos fast</strong> — keep the
-        good ones, reject the rest — using your voice, on-screen buttons, or the keyboard. Everything
-        runs on your computer; nothing is uploaded.
-      </p>
+      <ul className="space-y-2 text-sm text-neutral-300">
+        <li>
+          Choose a <strong className="text-neutral-100">local folder</strong> and start culling.
+        </li>
+        <li>
+          <Pill className="bg-keep/15 text-keep ring-keep/40">Yes</Pill> keep ·{" "}
+          <Pill className="bg-reject/15 text-reject ring-reject/40">No</Pill> reject
+        </li>
+        <li>
+          Or <Key>K</Key> keep · <Key>J</Key> reject · tap the on-screen buttons
+        </li>
+      </ul>
     ),
   },
   {
-    title: "1. Pick your photos",
+    title: "Controls",
     body: (
-      <div className="space-y-2">
-        <p>
-          Choose <strong className="text-neutral-100">Local folder</strong> and select a folder on
-          your computer. You'll grant read/write access so the app can sort files into subfolders.
-        </p>
-        <p className="text-neutral-400">
-          Works with JPEG, PNG, WebP and camera <strong className="text-neutral-200">RAW</strong>{" "}
-          (CR2, CR3, NEF, ARW, RAF, DNG…). For RAW, the embedded preview is shown for speed.
-        </p>
-      </div>
-    ),
-  },
-  {
-    title: "2. Keep or reject",
-    body: (
-      <div className="space-y-3">
-        <p>For each photo, make a decision and it auto-advances to the next:</p>
-        <div className="flex flex-wrap gap-2">
-          <Pill className="bg-keep/15 text-keep ring-keep/40">Say "Yes" → Keep</Pill>
-          <Pill className="bg-reject/15 text-reject ring-reject/40">Say "No" → Reject</Pill>
-        </div>
-        <p className="text-neutral-400">
-          Or tap the green ✓ / red ✕ buttons on the photo, or press{" "}
-          <Key>K</Key> (keep) and <Key>J</Key> (reject).
-        </p>
-      </div>
-    ),
-  },
-  {
-    title: "3. Choose how you drive it",
-    body: (
-      <div className="space-y-2">
-        <p>
-          Use the toggle in the top-right to pick your input style:
-        </p>
-        <ul className="space-y-1.5 text-neutral-300">
-          <li>
-            <Pill className="bg-neutral-800 text-neutral-200 ring-neutral-700">Keys</Pill> — on-screen
-            buttons only (mic off).
-          </li>
-          <li>
-            <Pill className="bg-neutral-800 text-neutral-200 ring-neutral-700">Voice</Pill> —
-            hands-free; buttons hidden.
-          </li>
-          <li>
-            <Pill className="bg-neutral-800 text-neutral-200 ring-neutral-700">Both</Pill> — voice and
-            buttons together.
-          </li>
-        </ul>
-        <p className="text-neutral-400">The keyboard always works in every mode.</p>
-      </div>
-    ),
-  },
-  {
-    title: "4. Changed your mind?",
-    body: (
-      <div className="space-y-2">
-        <p>
-          Hit the <strong className="text-neutral-100">Undo</strong> button (the ↩ circle at the
-          bottom of the photo) or press <Key>Z</Key>. It moves the file back and returns you to that
-          photo so you can re-decide.
-        </p>
-        <p className="text-neutral-400">
-          Use the side arrows or <Key>←</Key> / <Key>→</Key> to look back through earlier photos. A
-          decided photo is locked until you undo it.
-        </p>
-      </div>
-    ),
-  },
-  {
-    title: "5. Where photos go",
-    body: (
-      <div className="space-y-2">
-        <p>
-          Kept and rejected photos are moved into{" "}
-          <strong className="text-keep">Kept</strong> and{" "}
-          <strong className="text-reject">Rejected</strong> subfolders inside your chosen folder
-          (created automatically). You can rename these before you start.
-        </p>
-        <p className="text-neutral-400">
-          Nothing is deleted — rejected photos are just moved aside, and Undo brings them back.
-        </p>
-      </div>
+      <ul className="space-y-2 text-sm text-neutral-300">
+        <li>
+          Top-right toggle: <Key>Keys</Key> · <Key>Voice</Key> · <Key>Both</Key>
+        </li>
+        <li>
+          <Key>Z</Key> undo · <Key>←</Key> <Key>→</Key> browse · <Key>?</Key> shortcuts
+        </li>
+        <li>
+          Files move to <span className="text-keep">Kept</span> /{" "}
+          <span className="text-reject">Rejected</span> subfolders
+        </li>
+      </ul>
     ),
   },
 ];
@@ -120,37 +56,36 @@ export function Tutorial({ open, onClose }: TutorialProps) {
 
   const close = () => {
     onClose();
-    // Reset for next time it opens.
     setIndex(0);
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Tutorial"
       onClick={close}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-950 p-6 shadow-2xl"
+        className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-4">
-          <h2 className="text-lg font-semibold text-neutral-100">{slide.title}</h2>
+          <h2 className="text-base font-semibold text-neutral-100">{slide.title}</h2>
           <button
             type="button"
             onClick={close}
-            aria-label="Close tutorial"
+            aria-label="Close"
             className="text-neutral-500 hover:text-neutral-200"
           >
             ✕
           </button>
         </div>
 
-        <div className="min-h-[7rem] text-sm leading-relaxed text-neutral-300">{slide.body}</div>
+        <div className="min-h-[5rem]">{slide.body}</div>
 
-        <div className="mt-6 flex items-center justify-between">
+        <div className="mt-5 flex items-center justify-between">
           <div className="flex gap-1.5">
             {SLIDES.map((_, i) => (
               <span
@@ -167,7 +102,7 @@ export function Tutorial({ open, onClose }: TutorialProps) {
               <button
                 type="button"
                 onClick={() => setIndex((i) => i - 1)}
-                className="rounded-md px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                className="rounded-lg px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-900"
               >
                 Back
               </button>
@@ -176,15 +111,15 @@ export function Tutorial({ open, onClose }: TutorialProps) {
               <button
                 type="button"
                 onClick={close}
-                className="rounded-md bg-keep/20 px-4 py-1.5 text-sm font-medium text-keep ring-1 ring-keep/40 hover:bg-keep/30"
+                className="rounded-lg bg-keep px-4 py-1.5 text-sm font-medium text-black hover:brightness-110"
               >
-                Got it
+                Done
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => setIndex((i) => i + 1)}
-                className="rounded-md bg-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white"
+                className="rounded-lg bg-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white"
               >
                 Next
               </button>
@@ -199,7 +134,7 @@ export function Tutorial({ open, onClose }: TutorialProps) {
 function Pill({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${className}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${className}`}
     >
       {children}
     </span>
@@ -208,7 +143,7 @@ function Pill({ children, className = "" }: { children: React.ReactNode; classNa
 
 function Key({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-xs text-neutral-200">
+    <kbd className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200">
       {children}
     </kbd>
   );
