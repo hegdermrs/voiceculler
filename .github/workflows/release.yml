@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Bundle ExifTool
+        run: npm run bundle-exiftool
+
       - name: Build Mac app (Apple Silicon)
         if: github.event_name == 'push' || github.event.inputs.mac_target == 'apple-silicon'
         run: npx tauri build --target aarch64-apple-darwin
@@ -47,10 +50,12 @@ jobs:
         run: |
           mkdir -p release-artifacts/mac
           shopt -s nullglob
-          for f in src-tauri/target/*/release/bundle/dmg/*.dmg; do
+          for f in src-tauri/target/release/bundle/dmg/*.dmg \
+                   src-tauri/target/*/release/bundle/dmg/*.dmg; do
             cp "$f" release-artifacts/mac/
           done
-          for app in src-tauri/target/*/release/bundle/macos/*.app; do
+          for app in src-tauri/target/release/bundle/macos/*.app \
+                     src-tauri/target/*/release/bundle/macos/*.app; do
             ditto -c -k --sequesterRsrc --keepParent "$app" "release-artifacts/mac/$(basename "$app").zip"
           done
           ls -la release-artifacts/mac/
@@ -75,6 +80,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Bundle ExifTool
+        run: npm run bundle-exiftool
 
       - name: Build Windows installer
         run: npx tauri build

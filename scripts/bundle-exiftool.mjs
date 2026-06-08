@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "13.44";
+const VERSION = "13.59";
 const OUT_DIR = join("src-tauri", "resources", "exiftool");
 const BINARIES_DIR = join("src-tauri", "binaries");
 
@@ -83,7 +83,7 @@ async function findChildDir(parent, prefix) {
 async function bundleWindows() {
   const tmp = await mkdtemp(join(tmpdir(), "exiftool-win-"));
   const zipPath = join(tmp, "exiftool.zip");
-  await download(`https://exiftool.org/exiftool-${VERSION}.zip`, zipPath);
+  await download(`https://exiftool.org/exiftool-${VERSION}_64.zip`, zipPath);
 
   execSync(
     `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${tmp.replace(/'/g, "''")}' -Force"`,
