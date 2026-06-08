@@ -37,11 +37,11 @@ jobs:
 
       - name: Build Mac app (Apple Silicon)
         if: github.event_name == 'push' || github.event.inputs.mac_target == 'apple-silicon'
-        run: npm run tauri:build:mac
+        run: npx tauri build --target aarch64-apple-darwin
 
       - name: Build Mac app (Universal — Apple Silicon + Intel)
         if: github.event.inputs.mac_target == 'universal'
-        run: npm run tauri:build:mac-universal
+        run: npx tauri build --target universal-apple-darwin
 
       - name: Stage Mac artifacts
         run: |
@@ -77,7 +77,7 @@ jobs:
         run: npm ci
 
       - name: Build Windows installer
-        run: npm run tauri:build
+        run: npx tauri build
 
       - name: Stage Windows artifacts
         shell: pwsh
