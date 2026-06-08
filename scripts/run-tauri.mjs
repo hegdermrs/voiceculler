@@ -27,10 +27,15 @@ const env = {
 };
 
 const args = process.argv.slice(2);
-const result = spawnSync("tauri", args, {
+const tauriBin =
+  process.platform === "win32"
+    ? join(nodeBin, "tauri.cmd")
+    : join(nodeBin, "tauri");
+
+const result = spawnSync(tauriBin, args, {
   stdio: "inherit",
   env,
-  shell: process.platform === "win32",
+  shell: false,
 });
 
 process.exit(result.status ?? 1);

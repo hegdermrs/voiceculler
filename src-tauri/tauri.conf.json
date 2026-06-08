@@ -39,7 +39,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/exiftool"],
     "macOS": {
       "minimumSystemVersion": "11.0",
       "entitlements": "./Entitlements.plist",
