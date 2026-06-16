@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Decision, PhotoSource, PhotoState } from "../types";
 
-const PREFETCH_AHEAD = 4;
-const KEEP_BEHIND = 2;
+const PREFETCH_AHEAD = 8;
+const KEEP_BEHIND = 3;
 const MAX_RETRIES = 4;
 
 interface MoveJob {
@@ -155,24 +155,19 @@ export function useCullingSession(source: PhotoSource): CullingSession {
         });
     }
 
-    // Revoke and clear images outside the window.
+    // Drop state references outside the window — URLs stay alive in PhotoSource.
     for (let i = 0; i < states.length; i++) {
       if (i >= lo && i <= hi) continue;
       const s = states[i];
       if (!s.fullSrc) continue;
-      URL.revokeObjectURL(s.fullSrc);
       blobCacheRef.current.delete(s.photo.id);
-      // Drop the freed URL from state to bound memory on large folders.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       updateState(s.photo.id, { fullSrc: undefined });
     }
   }, [currentIndex, states, source, updateState]);
 
-  // Revoke remaining object URLs on unmount.
   useEffect(() => {
-    const cache = blobCacheRef.current;
     return () => {
-      for (const url of cache.values()) if (url) URL.revokeObjectURL(url);
+      blobCacheRef.current.clear();
     };
   }, []);
 

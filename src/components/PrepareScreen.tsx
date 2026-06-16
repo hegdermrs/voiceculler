@@ -9,7 +9,7 @@ export function PrepareScreen({ progress, photoCount }: PrepareScreenProps) {
   const { phase, done, total, currentName } = progress;
   const count = total || photoCount;
   const pct = count > 0 ? Math.round((done / count) * 100) : 100;
-  const title = phase === "preparing" ? "Preparing previews" : "Loading";
+  const title = phase === "preparing" ? "Preparing previews" : "Loading into memory";
 
   return (
     <div className="flex h-full w-full flex-col items-center justify-center bg-stage p-6">

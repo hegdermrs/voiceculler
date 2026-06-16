@@ -155,36 +155,34 @@ function LocalSetup({
 
   const startBackgroundPrep = (folder: PickedFolder) => {
     prepFolderRef.current = folder;
-    const rawsToBuild = folder.rawCount - folder.sidecarCount;
-    if (rawsToBuild <= 0) {
-      prepPromiseRef.current = Promise.resolve({
-        previewHandles: new Map(
-          folder.entries
-            .filter((e) => e.sidecarHandle)
-            .map((e) => [e.name, e.sidecarHandle!] as const),
-        ),
+    const extractTotal = Math.max(0, folder.rawCount - folder.sidecarCount);
+    const prepTotal = extractTotal + folder.sidecarCount || folder.entries.length;
+
+    if (prepTotal > 0) {
+      setBgPrep({
+        phase: "preparing",
+        done: 0,
+        total: prepTotal,
+        sidecarHits: folder.sidecarCount,
         extracted: 0,
         skippedCache: 0,
       });
-      setBgPrep(null);
-      return;
     }
-
-    setBgPrep({
-      phase: "preparing",
-      done: 0,
-      total: rawsToBuild,
-      sidecarHits: folder.sidecarCount,
-      extracted: 0,
-      skippedCache: 0,
-    });
 
     prepPromiseRef.current = buildPreviewCache(folder, (progress) => {
       if (prepFolderRef.current === folder) setBgPrep(progress);
-    }).then((result) => {
-      if (prepFolderRef.current === folder) setBgPrep(null);
-      return result;
-    });
+    })
+      .then((result) => {
+        if (prepFolderRef.current === folder) setBgPrep(null);
+        return result;
+      })
+      .catch((e) => {
+        if (prepFolderRef.current === folder) {
+          setBgPrep(null);
+          setError(e instanceof Error ? e.message : String(e));
+        }
+        throw e;
+      });
   };
 
   const handleChoose = async () => {
@@ -278,7 +276,7 @@ function LocalSetup({
               </button>
             </div>
             {bgPrep && (
-              <PrepBar done={bgPrep.done} total={bgPrep.total} label="Preparing RAW previews" />
+              <PrepBar done={bgPrep.done} total={bgPrep.total} label="Preparing previews" />
             )}
           </div>
         ) : (

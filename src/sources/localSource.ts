@@ -2,6 +2,7 @@ import type { Decision, Photo, PhotoSource } from "../types";
 import {
   extractRawPreviewBlob,
   isRawFile,
+  isViewableCacheFile,
   previewCacheFileName,
   toViewablePreviewBlob,
   VIEW_PREVIEW_MAX_BYTES,
@@ -11,7 +12,10 @@ const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp)$/i;
 const THUMB_MAX = 200;
 /** Hidden folder for extracted RAW previews (created inside the photo folder). */
 export const PREVIEW_CACHE_DIR = ".voiceculler_previews";
-const PREP_CONCURRENCY = 4;
+/** Two at a time during RAW extract (CPU-heavy). */
+const RAW_PREP_CONCURRENCY = 2;
+/** Loading small cached JPEGs into memory before culling — keep this high. */
+const WARM_CONCURRENCY = 8;
 
 export function isFileSystemAccessSupported(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
@@ -150,6 +154,27 @@ async function parallelForEach<T>(
   await Promise.all(workers);
 }
 
+/** True when a sidecar preview cache file is still valid. */
+function isSidecarCacheStillValid(sidecarFile: File, cacheFile: File): boolean {
+  return isViewableCacheFile(cacheFile) && cacheFile.lastModified >= sidecarFile.lastModified;
+}
+
+async function ensureSidecarCached(
+  cacheDir: FileSystemDirectoryHandle,
+  entry: LocalEntry,
+): Promise<FileSystemFileHandle> {
+  const sidecarFile = await entry.sidecarHandle!.getFile();
+  const cacheName = previewCacheFileName(entry.name);
+  try {
+    const existing = await cacheDir.getFileHandle(cacheName);
+    const cacheFile = await existing.getFile();
+    if (isSidecarCacheStillValid(sidecarFile, cacheFile)) return existing;
+  } catch {
+    // No cache yet.
+  }
+  return writeCacheFile(cacheDir, entry.name, sidecarFile);
+}
+
 /** True when an on-disk preview cache file is still valid for this RAW. */
 function isCacheStillValid(rawFile: File, cacheFile: File): boolean {
   return (
@@ -183,57 +208,90 @@ export async function buildPreviewCache(
     (e) => isRawFile(e.name) && !e.sidecarHandle,
   );
 
+  const sidecarEntries = picked.entries.filter((e) => e.sidecarHandle);
+  const prepTotal = rawsNeedingExtract.length + sidecarEntries.length;
+
   onProgress?.({
     phase: "preparing",
     done: 0,
-    total: rawsNeedingExtract.length,
+    total: prepTotal || picked.entries.length,
     sidecarHits: picked.sidecarCount,
     extracted: 0,
     skippedCache: 0,
   });
 
   let done = 0;
-  await parallelForEach(rawsNeedingExtract, PREP_CONCURRENCY, async (entry) => {
-    const cacheName = previewCacheFileName(entry.name);
-    const rawFile = await entry.handle.getFile();
-    let usedCache = false;
-
+  let failed = 0;
+  await parallelForEach(rawsNeedingExtract, RAW_PREP_CONCURRENCY, async (entry) => {
     try {
-      const existing = await cacheDir.getFileHandle(cacheName);
-      const cacheFile = await existing.getFile();
-      if (isCacheStillValid(rawFile, cacheFile)) {
-        previewHandles.set(entry.name, existing);
-        skippedCache += 1;
-        usedCache = true;
+      const cacheName = previewCacheFileName(entry.name);
+      const rawFile = await entry.handle.getFile();
+      let usedCache = false;
+
+      try {
+        const existing = await cacheDir.getFileHandle(cacheName);
+        const cacheFile = await existing.getFile();
+        if (isCacheStillValid(rawFile, cacheFile)) {
+          previewHandles.set(entry.name, existing);
+          skippedCache += 1;
+          usedCache = true;
+        }
+      } catch {
+        // No cache file yet.
       }
-    } catch {
-      // No cache file yet.
-    }
 
-    if (!usedCache) {
-      const blob = await extractRawPreviewBlob(rawFile);
-      const cacheHandle = await writeCacheFile(cacheDir, entry.name, blob);
-      previewHandles.set(entry.name, cacheHandle);
-      extracted += 1;
+      if (!usedCache) {
+        const blob = await extractRawPreviewBlob(rawFile);
+        const cacheHandle = await writeCacheFile(cacheDir, entry.name, blob);
+        previewHandles.set(entry.name, cacheHandle);
+        extracted += 1;
+      }
+    } catch (err) {
+      failed += 1;
+      console.warn(`Preview prep failed for ${entry.name}`, err);
+    } finally {
+      done += 1;
+      onProgress?.({
+        phase: "preparing",
+        done,
+        total: prepTotal || picked.entries.length,
+        currentName: entry.name,
+        sidecarHits: picked.sidecarCount,
+        extracted,
+        skippedCache,
+      });
     }
-
-    done += 1;
-    onProgress?.({
-      phase: "preparing",
-      done,
-      total: rawsNeedingExtract.length,
-      currentName: entry.name,
-      sidecarHits: picked.sidecarCount,
-      extracted,
-      skippedCache,
-    });
   });
 
+  if (failed > 0) {
+    console.warn(`${failed} RAW preview(s) could not be prepared.`);
+  }
+
+  for (const entry of sidecarEntries) {
+    try {
+      const cacheHandle = await ensureSidecarCached(cacheDir, entry);
+      previewHandles.set(entry.name, cacheHandle);
+    } catch (err) {
+      failed += 1;
+      console.warn(`Sidecar preview failed for ${entry.name}`, err);
+    } finally {
+      done += 1;
+      onProgress?.({
+        phase: "preparing",
+        done,
+        total: prepTotal || picked.entries.length,
+        currentName: entry.name,
+        sidecarHits: picked.sidecarCount,
+        extracted,
+        skippedCache,
+      });
+    }
+  }
+
   for (const entry of picked.entries) {
-    if (!entry.sidecarHandle) continue;
-    const sidecarFile = await entry.sidecarHandle.getFile();
-    const cacheHandle = await writeCacheFile(cacheDir, entry.name, sidecarFile);
-    previewHandles.set(entry.name, cacheHandle);
+    if (!isRawFile(entry.name)) {
+      previewHandles.set(entry.name, entry.handle);
+    }
   }
 
   return { previewHandles, extracted, skippedCache };
@@ -247,7 +305,7 @@ export async function prepareLocalSource(
   picked: PickedFolder,
   keptName: string,
   rejectedName: string,
-  onProgress: (progress: PrepareProgress) => void,
+  onProgress?: (progress: PrepareProgress) => void,
   prebuilt?: PrebuiltPreviewCache,
 ): Promise<LocalSource> {
   const keptDir = await picked.dir.getDirectoryHandle(keptName, { create: true });
@@ -276,7 +334,7 @@ export async function prepareLocalSource(
     previewHandles,
   );
 
-  onProgress({
+  onProgress?.({
     phase: "warming",
     done: 0,
     total: picked.entries.length,
@@ -286,7 +344,7 @@ export async function prepareLocalSource(
   });
 
   await source.warmPreviewCache((done, total, currentName) => {
-    onProgress({
+    onProgress?.({
       phase: "warming",
       done,
       total,
@@ -319,7 +377,8 @@ export class LocalSource implements PhotoSource {
   private readonly rejectedDir: FileSystemDirectoryHandle;
   private readonly entries = new Map<string, LocalEntry>();
   private readonly previewHandles = new Map<string, FileSystemFileHandle>();
-  /** Pre-loaded object URLs — culling reads from here only (instant). */
+  private readonly resolveInflight = new Map<string, Promise<FileSystemFileHandle>>();
+  /** Loaded object URLs keyed by photo id. */
   private readonly previewUrls = new Map<string, string>();
   private readonly thumbUrls = new Map<string, string>();
   private readonly objectUrls = new Set<string>();
@@ -340,32 +399,79 @@ export class LocalSource implements PhotoSource {
     for (const [id, handle] of previewHandles) this.previewHandles.set(id, handle);
   }
 
-  /** Loads every display preview into memory before culling starts. */
+  /** Loads every preview into memory so culling never waits on a decode. */
   async warmPreviewCache(
     onProgress?: (done: number, total: number, currentName?: string) => void,
   ): Promise<void> {
     const ids = this.photos.map((p) => p.id);
     let done = 0;
-    await parallelForEach(ids, PREP_CONCURRENCY, async (id) => {
-      await this.ensurePreviewLoaded(id);
-      done += 1;
-      onProgress?.(done, ids.length, id);
+    await parallelForEach(ids, WARM_CONCURRENCY, async (id) => {
+      try {
+        await this.ensurePreviewLoaded(id);
+      } catch (err) {
+        console.warn(`Preview warm failed for ${id}`, err);
+      } finally {
+        done += 1;
+        onProgress?.(done, ids.length, id);
+      }
     });
+  }
+
+  private async resolvePreviewHandle(id: string): Promise<FileSystemFileHandle> {
+    const existing = this.previewHandles.get(id);
+    if (existing) return existing;
+
+    const inflight = this.resolveInflight.get(id);
+    if (inflight) return inflight;
+
+    const work = this.resolvePreviewHandleInner(id).finally(() => {
+      this.resolveInflight.delete(id);
+    });
+    this.resolveInflight.set(id, work);
+    return work;
+  }
+
+  private async resolvePreviewHandleInner(id: string): Promise<FileSystemFileHandle> {
+    const entry = this.entries.get(id);
+    if (!entry) throw new Error(`Unknown photo: ${id}`);
+
+    if (entry.sidecarHandle) {
+      this.previewHandles.set(id, entry.sidecarHandle);
+      return entry.sidecarHandle;
+    }
+
+    if (!isRawFile(id)) {
+      this.previewHandles.set(id, entry.handle);
+      return entry.handle;
+    }
+
+    const cacheDir = await this.srcDir.getDirectoryHandle(PREVIEW_CACHE_DIR, { create: true });
+    const cacheName = previewCacheFileName(id);
+    const rawFile = await entry.handle.getFile();
+
+    try {
+      const cached = await cacheDir.getFileHandle(cacheName);
+      const cacheFile = await cached.getFile();
+      if (isCacheStillValid(rawFile, cacheFile)) {
+        this.previewHandles.set(id, cached);
+        return cached;
+      }
+    } catch {
+      // No cache yet — extract below (background prep may write it concurrently).
+    }
+
+    const blob = await extractRawPreviewBlob(rawFile);
+    const handle = await writeCacheFile(cacheDir, id, blob);
+    this.previewHandles.set(id, handle);
+    return handle;
   }
 
   private async ensurePreviewLoaded(id: string): Promise<void> {
     if (this.previewUrls.has(id)) return;
 
-    const entry = this.entries.get(id);
-    if (!entry) throw new Error(`Unknown photo: ${id}`);
-
-    let handle = this.previewHandles.get(id);
-    if (!handle && !isRawFile(id)) handle = entry.handle;
-
-    if (!handle) throw new Error(`No preview prepared for ${id}`);
-
+    const handle = await this.resolvePreviewHandle(id);
     const file = await handle.getFile();
-    const viewBlob = await toViewablePreviewBlob(file);
+    const viewBlob = isViewableCacheFile(file) ? file : await toViewablePreviewBlob(file);
     const url = URL.createObjectURL(viewBlob);
     this.previewUrls.set(id, url);
     this.objectUrls.add(url);
@@ -500,14 +606,14 @@ async function moveFileHandle(
 /** Downscales an image blob to a small JPEG object URL to keep memory low. */
 async function makeThumbUrl(file: Blob): Promise<string> {
   try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, THUMB_MAX / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = new OffscreenCanvas(w, h);
+    const bitmap = await createImageBitmap(file, {
+      resizeWidth: THUMB_MAX,
+      resizeQuality: "low",
+    });
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
-    ctx.drawImage(bitmap, 0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0);
     bitmap.close();
     const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.62 });
     return URL.createObjectURL(blob);
